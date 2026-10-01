@@ -1,0 +1,21 @@
+{
+  "name": "moeprof",
+  "interface": {
+    "displayName": "MoeProf"
+  },
+  "plugins": [
+    {
+      "name": "moeprof",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/MuhsinKader/moeprof.git",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
