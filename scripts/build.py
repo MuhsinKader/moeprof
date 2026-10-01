@@ -1,22 +1,32 @@
 #!/usr/bin/env python3
-"""Generate MoeProf surface adapters from the canonical sources.
+"""Generate MoeProf adapters and compatibility packaging from canonical sources.
 
-This script is intentionally dependency-free. The human-maintained sources are:
+Human-maintained canonical inputs:
+- plugin.json
 - governor/constitution.md
 - exactly four canonical skills under skills/
 
-Generated adapters must never be edited by hand.
+Generated outputs:
+- adapters/codex/AGENTS.md
+- adapters/chatgpt/custom-instructions.txt
+- adapters/local/instructions.md
+- .codex-plugin/plugin.json
+
+Generated files must never be edited by hand.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+PORTABLE_MANIFEST = ROOT / "plugin.json"
+CODEX_MANIFEST = ROOT / ".codex-plugin" / "plugin.json"
 GOVERNOR = ROOT / "governor" / "constitution.md"
 
 SKILLS = {
@@ -26,7 +36,7 @@ SKILLS = {
     "moeprof-verification": ROOT / "skills" / "moeprof-verification" / "SKILL.md",
 }
 
-TARGETS = {
+ADAPTER_TARGETS = {
     "codex": ROOT / "adapters" / "codex" / "AGENTS.md",
     "chatgpt": ROOT / "adapters" / "chatgpt" / "custom-instructions.txt",
     "local": ROOT / "adapters" / "local" / "instructions.md",
@@ -38,6 +48,8 @@ SURFACE_LABELS = {
     "local": "Local OpenAI-powered runtime",
 }
 
+EXPECTED_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+EXPECTED_PLUGIN_NAME = "moeprof"
 NAME_RE = re.compile(r"^name:\s*(\S+)\s*$", re.MULTILINE)
 
 
@@ -50,6 +62,36 @@ def read_bytes(path: Path) -> bytes:
 def git_blob_sha(data: bytes) -> str:
     header = f"blob {len(data)}\0".encode("utf-8")
     return hashlib.sha1(header + data).hexdigest()
+
+
+def load_portable_manifest() -> dict[str, object]:
+    raw = read_bytes(PORTABLE_MANIFEST)
+    try:
+        manifest = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Invalid plugin.json: {exc}") from exc
+
+    if not isinstance(manifest, dict):
+        raise SystemExit("plugin.json must contain a JSON object")
+
+    if manifest.get("$schema") != EXPECTED_SCHEMA:
+        raise SystemExit(
+            f"plugin.json must use schema {EXPECTED_SCHEMA!r}"
+        )
+
+    if manifest.get("name") != EXPECTED_PLUGIN_NAME:
+        raise SystemExit(
+            f"plugin.json name must be {EXPECTED_PLUGIN_NAME!r}"
+        )
+
+    version = manifest.get("version")
+    description = manifest.get("description")
+    if not isinstance(version, str) or not version.strip():
+        raise SystemExit("plugin.json requires a non-empty string version")
+    if not isinstance(description, str) or not description.strip():
+        raise SystemExit("plugin.json requires a non-empty string description")
+
+    return manifest
 
 
 def canonical_sources() -> list[tuple[Path, bytes]]:
@@ -90,11 +132,10 @@ def canonical_sources() -> list[tuple[Path, bytes]]:
 
 
 def source_state(sources: list[tuple[Path, bytes]]) -> str:
-    lines = []
-    for path, data in sources:
-        rel = path.relative_to(ROOT).as_posix()
-        lines.append(f"{rel}@{git_blob_sha(data)}")
-    return "\n".join(lines)
+    return "\n".join(
+        f"{path.relative_to(ROOT).as_posix()}@{git_blob_sha(data)}"
+        for path, data in sources
+    )
 
 
 def render_adapter(surface: str, governor_text: str, state: str) -> str:
@@ -115,14 +156,28 @@ def render_adapter(surface: str, governor_text: str, state: str) -> str:
     )
 
 
+def render_codex_manifest(manifest: dict[str, object]) -> str:
+    compatibility = {
+        "name": manifest["name"],
+        "version": manifest["version"],
+        "description": manifest["description"],
+        "skills": "./skills/",
+    }
+    return json.dumps(compatibility, indent=2, ensure_ascii=False) + "\n"
+
+
 def expected_outputs() -> dict[Path, str]:
+    manifest = load_portable_manifest()
     sources = canonical_sources()
     governor_text = sources[0][1].decode("utf-8")
     state = source_state(sources)
-    return {
-        TARGETS[surface]: render_adapter(surface, governor_text, state)
-        for surface in TARGETS
+
+    outputs = {
+        ADAPTER_TARGETS[surface]: render_adapter(surface, governor_text, state)
+        for surface in ADAPTER_TARGETS
     }
+    outputs[CODEX_MANIFEST] = render_codex_manifest(manifest)
+    return outputs
 
 
 def write_outputs(outputs: dict[Path, str]) -> None:
@@ -148,18 +203,18 @@ def check_outputs(outputs: dict[Path, str]) -> int:
         print("Run: python scripts/build.py")
         return 1
 
-    print("OK: generated adapters match canonical MoeProf sources")
+    print("OK: generated MoeProf artifacts match canonical sources")
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate or verify MoeProf surface adapters."
+        description="Generate or verify MoeProf adapters and compatibility packaging."
     )
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Fail if generated adapters are missing or stale.",
+        help="Fail if generated artifacts are missing or stale.",
     )
     args = parser.parse_args()
 
