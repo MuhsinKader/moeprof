@@ -54,9 +54,15 @@ NAME_RE = re.compile(r"^name:\s*(\S+)\s*$", re.MULTILINE)
 
 
 def read_bytes(path: Path) -> bytes:
+    """Read canonical text with platform-independent LF line endings.
+
+    Git may check files out as CRLF on Windows. Normalizing here keeps generated
+    source hashes and adapters identical across Windows, macOS, and Linux.
+    """
     if not path.is_file():
         raise SystemExit(f"Missing canonical source: {path.relative_to(ROOT)}")
-    return path.read_bytes()
+    text = path.read_text(encoding="utf-8")
+    return text.encode("utf-8")
 
 
 def git_blob_sha(data: bytes) -> str:
