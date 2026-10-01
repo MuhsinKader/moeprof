@@ -1,0 +1,6 @@
+# MoeProf Codex user-level configuration
+# Merge this into ~/.codex/config.toml (or $CODEX_HOME/config.toml).
+# Do not copy this into project repositories.
+
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"
